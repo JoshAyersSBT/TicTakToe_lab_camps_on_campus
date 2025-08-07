@@ -1,64 +1,55 @@
 #include "Arduino.h"
-#include "Joystick.h"
 #include "MaxMatrix.h"
-#include "Button.h"
 
-// Pin Definitions
-#define JOYSTICK_PIN_SW 2
-#define JOYSTICK_PIN_VRX A10
-#define JOYSTICK_PIN_VRY A0
-#define LEDMATRIX_PIN_DIN 50
-#define LEDMATRIX_PIN_CLK 51
-#define LEDMATRIX_PIN_CS 53
-#define PUSHBUTTON_PIN_2 3
+// Joystick Pins
+#define JOY_X A10
+#define JOY_Y A0
 
-// Hardware initialization
-Joystick joystick(JOYSTICK_PIN_VRX, JOYSTICK_PIN_VRY, JOYSTICK_PIN_SW);
-MaxMatrix ledMatrix(LEDMATRIX_PIN_DIN, LEDMATRIX_PIN_CS, LEDMATRIX_PIN_CLK);
-Button pushButton(PUSHBUTTON_PIN_2);
+// Matrix Pins
+#define LEDMATRIX_DIN 50
+#define LEDMATRIX_CLK 51
+#define LEDMATRIX_CS  53
 
-// Game board (0 = empty, 1 = X, 2 = O)
+// Button (for placing marks)
+#define BTN_PIN 3
+
+// LED Matrix
+MaxMatrix ledMatrix(LEDMATRIX_DIN, LEDMATRIX_CS, LEDMATRIX_CLK);
+
+// Game state
 byte board[3][3] = { 0 };
-
-// Cursor position
-int cursorX = 0;
-int cursorY = 0;
-
-// Turn: true = X, false = O
+int cursorX = 0, cursorY = 0;
 bool currentPlayer = true;
 
-// Debounce
+// Timing
 unsigned long lastMoveTime = 0;
-const int moveDelay = 250;
-
-// Cursor blink
-bool cursorVisible = true;
 unsigned long lastBlinkTime = 0;
-const int blinkInterval = 300;
-
-// Pixel locations for grid cells
-const int cellSize = 2;
-const int cellOffset = 1;
+bool cursorVisible = true;
+const int moveDelay = 250;
+const int blinkDelay = 300;
 
 void setup() {
   Serial.begin(9600);
+  pinMode(BTN_PIN, INPUT_PULLUP);
+
   ledMatrix.init(1);
   ledMatrix.setIntensity(5);
   ledMatrix.clear();
-  pushButton.init();
+
   Serial.println("Tic-Tac-Toe started.");
+  printBoardState();
 }
 
 void drawSymbol(int cellX, int cellY, byte value) {
-  int baseX = cellX * (cellSize + cellOffset);
-  int baseY = cellY * (cellSize + cellOffset);
+  int baseX = cellX * 3;
+  int baseY = cellY * 3;
 
   if (value == 1) {
-    // X: 2 dots, top-left and bottom-right
-    ledMatrix.setDot(baseX, baseY, true);
-    ledMatrix.setDot(baseX + 1, baseY + 1, true);
+    // X = 2 diagonal dots
+    ledMatrix.setDot(baseX,     baseY,     true);
+    ledMatrix.setDot(baseX + 2, baseY + 2, true);
   } else if (value == 2) {
-    // O: 4 dots forming a square
+    // O = 4-dot ring
     ledMatrix.setDot(baseX,     baseY,     true);
     ledMatrix.setDot(baseX + 1, baseY,     true);
     ledMatrix.setDot(baseX,     baseY + 1, true);
@@ -66,61 +57,37 @@ void drawSymbol(int cellX, int cellY, byte value) {
   }
 }
 
-void drawCursor() {
-  int cx = cursorX * (cellSize + cellOffset);
-  int cy = cursorY * (cellSize + cellOffset);
-  ledMatrix.setDot(cx,     cy,     true);
-  ledMatrix.setDot(cx + 1, cy,     true);
-  ledMatrix.setDot(cx,     cy + 1, true);
-  ledMatrix.setDot(cx + 1, cy + 1, true);
-}
-
 void drawBoard() {
-  // Clear entire display manually
-  for (int x = 0; x < 8; x++) {
-    for (int y = 0; y < 8; y++) {
+  // Clear display
+  for (int x = 0; x < 8; x++)
+    for (int y = 0; y < 8; y++)
       ledMatrix.setDot(x, y, false);
-    }
-  }
 
-  // Draw board symbols
+  // Draw Xs and Os
   for (int y = 0; y < 3; y++) {
     for (int x = 0; x < 3; x++) {
-      int baseX = x * (cellSize + cellOffset);
-      int baseY = y * (cellSize + cellOffset);
-      byte value = board[y][x];
-
-      if (value == 1) {
-        // X: 2 dots
-        ledMatrix.setDot(baseX,     baseY,     true);
-        ledMatrix.setDot(baseX + 1, baseY + 1, true);
-      } else if (value == 2) {
-        // O: 4 dots
-        ledMatrix.setDot(baseX,     baseY,     true);
-        ledMatrix.setDot(baseX + 1, baseY,     true);
-        ledMatrix.setDot(baseX,     baseY + 1, true);
-        ledMatrix.setDot(baseX + 1, baseY + 1, true);
+      if (board[y][x] != 0) {
+        drawSymbol(x, y, board[y][x]);
       }
     }
   }
 
-  // Blinking cursor pixel (top-left corner of selected cell)
+  // Draw blinking cursor in center of selected cell
   if (cursorVisible) {
-    int cx = cursorX * (cellSize + cellOffset);
-    int cy = cursorY * (cellSize + cellOffset);
+    int cx = cursorX * 3;
+    int cy = cursorY * 3;
     ledMatrix.setDot(cx, cy, true);
   }
 }
-
 
 void printBoardState() {
   Serial.println("Board:");
   for (int y = 0; y < 3; y++) {
     for (int x = 0; x < 3; x++) {
-      char mark = '.';
-      if (board[y][x] == 1) mark = 'X';
-      else if (board[y][x] == 2) mark = 'O';
-      Serial.print(mark);
+      char ch = '.';
+      if (board[y][x] == 1) ch = 'X';
+      if (board[y][x] == 2) ch = 'O';
+      Serial.print(ch);
       Serial.print(" ");
     }
     Serial.println();
@@ -128,46 +95,106 @@ void printBoardState() {
   Serial.println();
 }
 
+bool checkWin(int player) {
+  for (int i = 0; i < 3; i++) {
+    if (board[i][0] == player && board[i][1] == player && board[i][2] == player) return true;
+    if (board[0][i] == player && board[1][i] == player && board[2][i] == player) return true;
+  }
+  if (board[0][0] == player && board[1][1] == player && board[2][2] == player) return true;
+  if (board[0][2] == player && board[1][1] == player && board[2][0] == player) return true;
+  return false;
+}
+
+void flashVictory() {
+  for (int i = 0; i < 4; i++) {
+    for (int x = 0; x < 8; x++)
+      for (int y = 0; y < 8; y++)
+        ledMatrix.setDot(x, y, true);
+    delay(200);
+    for (int x = 0; x < 8; x++)
+      for (int y = 0; y < 8; y++)
+        ledMatrix.setDot(x, y, false);
+    delay(200);
+  }
+}
+
+void resetGame() {
+  for (int y = 0; y < 3; y++)
+    for (int x = 0; x < 3; x++)
+      board[y][x] = 0;
+
+  cursorX = 0;
+  cursorY = 0;
+  currentPlayer = true;
+  Serial.println("Game reset.");
+  printBoardState();
+}
+
 void handleInput() {
-  int x = joystick.getX();
-  int y = joystick.getY();
+  int joyX = analogRead(JOY_X);
+  int joyY = analogRead(JOY_Y);
+  bool btnPressed = digitalRead(BTN_PIN) == LOW;
+
+  Serial.print("X: "); Serial.print(joyX);
+  Serial.print(" Y: "); Serial.print(joyY);
+  Serial.print(" Btn: "); Serial.print(btnPressed ? "Pressed" : "Released");
+  Serial.print(" Cursor: ("); Serial.print(cursorX); Serial.print(","); Serial.print(cursorY); Serial.println(")");
+
   unsigned long now = millis();
 
+  // Cursor movement with wrap-around
   if (now - lastMoveTime > moveDelay) {
-    if (x < 300 && cursorX > 0) {
-      cursorX--;
+    if (joyX < 300) {
+      cursorX = (cursorX + 2) % 3; // wrap left
       lastMoveTime = now;
-    } else if (x > 700 && cursorX < 2) {
-      cursorX++;
+      Serial.println("Moved Left");
+    } else if (joyX > 700) {
+      cursorX = (cursorX + 1) % 3; // wrap right
       lastMoveTime = now;
+      Serial.println("Moved Right");
     }
 
-    if (y < 300 && cursorY < 2) {
-      cursorY++;
+    if (joyY < 300) {
+      cursorY = (cursorY + 1) % 3; // wrap down
       lastMoveTime = now;
-    } else if (y > 700 && cursorY > 0) {
-      cursorY--;
+      Serial.println("Moved Down");
+    } else if (joyY > 700) {
+      cursorY = (cursorY + 2) % 3; // wrap up
       lastMoveTime = now;
+      Serial.println("Moved Up");
     }
   }
 
-  if (pushButton.onPress()) {
-    if (board[cursorY][cursorX] == 0) {
-      board[cursorY][cursorX] = currentPlayer ? 1 : 2;
+  // Button press detection (edge-triggered)
+  static bool lastBtnState = HIGH;
+  if (lastBtnState == HIGH && btnPressed && board[cursorY][cursorX] == 0) {
+    int thisPlayer = currentPlayer ? 1 : 2;
+    board[cursorY][cursorX] = thisPlayer;
+
+    Serial.print("Placed "); Serial.println(thisPlayer == 1 ? "X" : "O");
+    printBoardState();
+
+    if (checkWin(thisPlayer)) {
+      Serial.print("Player "); Serial.print(thisPlayer == 1 ? "X" : "O"); Serial.println(" wins!");
+      flashVictory();
+      resetGame();
+      delay(500);  // Small pause after reset
+    } else {
       currentPlayer = !currentPlayer;
-      printBoardState();
     }
   }
+  lastBtnState = btnPressed;
 }
 
 void loop() {
   handleInput();
 
-  if (millis() - lastBlinkTime > blinkInterval) {
+  // Cursor blinking logic
+  if (millis() - lastBlinkTime > blinkDelay) {
     cursorVisible = !cursorVisible;
     lastBlinkTime = millis();
   }
 
   drawBoard();
-  delay(50);
+  delay(30);
 }
