@@ -135,11 +135,6 @@ void handleInput() {
   int joyY = analogRead(JOY_Y);
   bool btnPressed = digitalRead(BTN_PIN) == LOW;
 
-  Serial.print("X: "); Serial.print(joyX);
-  Serial.print(" Y: "); Serial.print(joyY);
-  Serial.print(" Btn: "); Serial.print(btnPressed ? "Pressed" : "Released");
-  Serial.print(" Cursor: ("); Serial.print(cursorX); Serial.print(","); Serial.print(cursorY); Serial.println(")");
-
   unsigned long now = millis();
 
   // Cursor movement with wrap-around
