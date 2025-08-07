@@ -37,8 +37,8 @@ unsigned long lastBlinkTime = 0;
 const int blinkInterval = 300;
 
 // Pixel locations for grid cells
-const int cellSize = 2; // size of each cell in pixels
-const int cellOffset = 1; // spacing between cells
+const int cellSize = 2;
+const int cellOffset = 1;
 
 void setup() {
   Serial.begin(9600);
@@ -46,6 +46,7 @@ void setup() {
   ledMatrix.setIntensity(5);
   ledMatrix.clear();
   pushButton.init();
+  Serial.println("Tic-Tac-Toe started.");
 }
 
 void drawSymbol(int cellX, int cellY, byte value) {
@@ -53,13 +54,11 @@ void drawSymbol(int cellX, int cellY, byte value) {
   int baseY = cellY * (cellSize + cellOffset);
 
   if (value == 1) {
-    // Draw X
-    ledMatrix.setDot(baseX,     baseY,     true);
+    // X: 2 dots, top-left and bottom-right
+    ledMatrix.setDot(baseX, baseY, true);
     ledMatrix.setDot(baseX + 1, baseY + 1, true);
-    ledMatrix.setDot(baseX,     baseY + 1, true);
-    ledMatrix.setDot(baseX + 1, baseY,     true);
   } else if (value == 2) {
-    // Draw O
+    // O: 4 dots forming a square
     ledMatrix.setDot(baseX,     baseY,     true);
     ledMatrix.setDot(baseX + 1, baseY,     true);
     ledMatrix.setDot(baseX,     baseY + 1, true);
@@ -67,31 +66,71 @@ void drawSymbol(int cellX, int cellY, byte value) {
   }
 }
 
+void drawCursor() {
+  int cx = cursorX * (cellSize + cellOffset);
+  int cy = cursorY * (cellSize + cellOffset);
+  ledMatrix.setDot(cx,     cy,     true);
+  ledMatrix.setDot(cx + 1, cy,     true);
+  ledMatrix.setDot(cx,     cy + 1, true);
+  ledMatrix.setDot(cx + 1, cy + 1, true);
+}
+
 void drawBoard() {
-  ledMatrix.clear();
+  // Clear entire display manually
+  for (int x = 0; x < 8; x++) {
+    for (int y = 0; y < 8; y++) {
+      ledMatrix.setDot(x, y, false);
+    }
+  }
+
+  // Draw board symbols
   for (int y = 0; y < 3; y++) {
     for (int x = 0; x < 3; x++) {
-      if (board[y][x] != 0) {
-        drawSymbol(x, y, board[y][x]);
+      int baseX = x * (cellSize + cellOffset);
+      int baseY = y * (cellSize + cellOffset);
+      byte value = board[y][x];
+
+      if (value == 1) {
+        // X: 2 dots
+        ledMatrix.setDot(baseX,     baseY,     true);
+        ledMatrix.setDot(baseX + 1, baseY + 1, true);
+      } else if (value == 2) {
+        // O: 4 dots
+        ledMatrix.setDot(baseX,     baseY,     true);
+        ledMatrix.setDot(baseX + 1, baseY,     true);
+        ledMatrix.setDot(baseX,     baseY + 1, true);
+        ledMatrix.setDot(baseX + 1, baseY + 1, true);
       }
     }
   }
 
-  // Cursor blink
+  // Blinking cursor pixel (top-left corner of selected cell)
   if (cursorVisible) {
     int cx = cursorX * (cellSize + cellOffset);
     int cy = cursorY * (cellSize + cellOffset);
-    ledMatrix.setDot(cx,     cy,     true);
-    ledMatrix.setDot(cx + 1, cy,     true);
-    ledMatrix.setDot(cx,     cy + 1, true);
-    ledMatrix.setDot(cx + 1, cy + 1, true);
+    ledMatrix.setDot(cx, cy, true);
   }
+}
+
+
+void printBoardState() {
+  Serial.println("Board:");
+  for (int y = 0; y < 3; y++) {
+    for (int x = 0; x < 3; x++) {
+      char mark = '.';
+      if (board[y][x] == 1) mark = 'X';
+      else if (board[y][x] == 2) mark = 'O';
+      Serial.print(mark);
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+  Serial.println();
 }
 
 void handleInput() {
   int x = joystick.getX();
   int y = joystick.getY();
-
   unsigned long now = millis();
 
   if (now - lastMoveTime > moveDelay) {
@@ -116,6 +155,7 @@ void handleInput() {
     if (board[cursorY][cursorX] == 0) {
       board[cursorY][cursorX] = currentPlayer ? 1 : 2;
       currentPlayer = !currentPlayer;
+      printBoardState();
     }
   }
 }
@@ -123,7 +163,6 @@ void handleInput() {
 void loop() {
   handleInput();
 
-  // Blink cursor
   if (millis() - lastBlinkTime > blinkInterval) {
     cursorVisible = !cursorVisible;
     lastBlinkTime = millis();
